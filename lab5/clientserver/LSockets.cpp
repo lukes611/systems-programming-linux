@@ -72,31 +72,73 @@ namespace ll_socket
 	{
 		send(client, data.c_str(), data.size(), 0);
 	}
-}
 
-#ifndef WIN32 //if linux
-
-#include <sys/socket.h> //for socket() function
-#include <netinet/in.h> //for sockaddr_in
-#include <unistd.h>
-#include <netinet/in.h>
-#include <netdb.h> 
-
-
-namespace ll_socket
-{
-
-	
 	void LServer::shutdown()
 	{
-		end();
-		close(primary);
+		ll_close_a_socket(primary);
 	}
-	void LServer::end()
+	void LServer::shutdown_client()
 	{
-		close(client);
+		ll_close_a_socket(client);
+	}
+	void LServer::shutdown_both()
+	{
+		shutdown_client();
+		shutdown();
 	}
 
+	LClient::LClient(){}
+	LClient::LClient(std::string address, int port)
+	{
+		this->port = port;
+		this->address = address;
+	}
+	LClient::LClient(const LClient & in)
+	{
+		port = in.port;
+		address = in.address;
+		server = in.server;
+	}
+	LClient & LClient::operator = (const LClient & in)
+	{
+		port = in.port;
+		address = in.address;
+		server = in.server;
+		return *this;
+	}
+	void LClient::shutdown()
+	{
+		ll_close_a_socket(server);
+	}
+	void LClient::error(string er)
+	{
+		cout << er << endl;
+		exit(5);
+	}
+	string LClient::read(int max)
+	{
+		char * tmp = new char[max];
+		int N = recv(server, tmp, max, 0);
+		tmp[N] = 0x00;
+		string rv = tmp;
+		delete [] tmp;
+		return rv;
+	}
+	void LClient::write(std::string data)
+	{
+		send(server, data.c_str(), data.size(), 0);
+	}
+
+}
+
+//seperate functionality
+#ifndef WIN32 //if linux
+namespace ll_socket
+{
+	void ll_close_a_socket(ll_socket_ob _sock)
+	{
+		close(_sock);
+	}
 	void LServer::wait_for_client()
 	{
 		struct sockaddr_in cli_name;
@@ -118,25 +160,7 @@ namespace ll_socket
 	}
 
 	//client part
-	LClient::LClient(){}
-	LClient::LClient(std::string address, int port)
-	{
-		this->port = port;
-		this->address = address;
-	}
-	LClient::LClient(const LClient & in)
-	{
-		port = in.port;
-		address = in.address;
-		server = in.server;
-	}
-	LClient & LClient::operator = (const LClient & in)
-	{
-		port = in.port;
-		address = in.address;
-		server = in.server;
-		return *this;
-	}
+	
 	bool LClient::open()
 	{
 		struct sockaddr_in serv_addr;
@@ -159,35 +183,19 @@ namespace ll_socket
 			return false;
 		return true;
 	}
-	void LClient::shutdown()
-	{
-		close(server);
-	}
-	std::string LClient::read(int max)
-	{
-		char * tmp = new char[max];
-		int N = recv(server, tmp, max, 0);
-		tmp[N] = 0x00;
-		string rv = tmp;
-		delete [] tmp;
-		return rv;
-	}
-	void LClient::write(std::string data)
-	{
-		send(server, data.c_str(), data.size(), 0);
-	}
-	void LClient::error(string er)
-	{
-		cout << er << endl;
-		exit(5);
-	}
+	
+	
+
 }
 
 #else
 
 namespace ll_socket
 {
-
+	void ll_close_a_socket(ll_socket_ob _sock)
+	{
+		closesocket(_sock);
+	}
 	void LServer::wait_for_client()
 	{
 		client = accept(primary, NULL, NULL);
@@ -198,15 +206,6 @@ namespace ll_socket
 			WSACleanup();
 			error(tmp);
 		}
-	}
-	void LServer::shutdown()
-	{
-		end();
-		closesocket(primary);
-	}
-	void LServer::end()
-	{
-		closesocket(client);
 	}
 	void LServer::setup()
 	{
@@ -265,19 +264,68 @@ namespace ll_socket
 			error(tmp_errorst);
 		}
 	}
-	void LServer::windows_init()
+	void ll_socket_windows_init()
 	{
 		WSADATA wsaData;
 		int result = WSAStartup(MAKEWORD(2,2), &wsaData);
 		if (result != 0)
 		{
-			error("failure on WSAStartup() in LServer::windows_init()");
+			LServer::error("failure on WSAStartup() in ll_socket_windows_init()");
 		}
 	}
-	void LServer::windows_destroy()
+	void ll_socket_windows_destroy()
 	{
 		WSACleanup();
 	}
-	
+
+	bool LClient::open()
+	{
+		server = INVALID_SOCKET;
+		int iResult;
+		struct addrinfo *result = NULL, *ptr = NULL, hints;
+		ZeroMemory( &hints, sizeof(hints) );
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_STREAM;
+		hints.ai_protocol = IPPROTO_TCP;
+		string port_string = to_string(port);
+		cout << "right now right here " << endl;
+		// Resolve the server address and port
+		iResult = getaddrinfo(address.c_str(), port_string.c_str(), &hints, &result);
+		if(iResult != 0)
+		{
+			cout << "failed at getaddrinfo()" << endl;
+			return false;
+		}
+
+		for(ptr=result; ptr != NULL ;ptr=ptr->ai_next)
+		{
+			// Create a SOCKET for connecting to server
+			server = socket(ptr->ai_family, ptr->ai_socktype, 
+				ptr->ai_protocol);
+			if (server == INVALID_SOCKET) {
+				printf("socket failed with error: %ld\n", WSAGetLastError());
+				return false;
+			}
+
+			// Connect to server.
+			iResult = connect( server, ptr->ai_addr, (int)ptr->ai_addrlen);
+			if (iResult == SOCKET_ERROR) {
+				closesocket(server);
+				server = INVALID_SOCKET;
+				continue;
+			}
+			break;
+		}
+		
+		freeaddrinfo(result);
+
+		if (server == INVALID_SOCKET) {
+			cout << "Unable to connect to server!\n";
+			return false;
+		}
+
+		return true;
+	}
+
 }
 #endif

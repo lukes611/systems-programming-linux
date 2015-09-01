@@ -26,20 +26,20 @@ int main()
 	
 	server.wait_for_client();
 	
-	while(true)
+	//while(true)
 	{
-		string msg = server.read();
+		string msg = "you connected to ME bitch!";
+		server.write(msg);
+		//cout << msg << endl;
 		
-		cout << msg << endl;
-		
-		if(msg == "quit")
-		{
-			cout << "terminating transmission" << endl;
-			break;
-		}
+		//if(msg == "quit")
+		//{
+		//	cout << "terminating transmission" << endl;
+		//	break;
+		//}
 	}
 	
-	server.shutdown();
+	server.shutdown_both();
 	
 	
 	return 0;
